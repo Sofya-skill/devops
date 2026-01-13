@@ -1,0 +1,9 @@
+tag: "latest"                  
+replicas: 1                   
+image:
+  repository: hub.docker.com/skillfactory/testapp
+  tag: "{{ .Values.tag }}"   
+service:
+  type: LoadBalancer          
+  port: 80                    
+containerPort: 8000 

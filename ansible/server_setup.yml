@@ -1,0 +1,78 @@
+---
+- name: Configure servers
+  hosts: servers
+  become: yes
+  tasks:
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+   - name: Install Git
+      apt:
+        name: git
+        state: present
+
+   - name: Download docker-compose binary
+      get_url:
+        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-{{ ansible_system | lower }}-{{ ansible_architecture }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+
+    - name: Install kubeadm, kubelet, kubectl
+      apt:
+        name: ['apt-transport-https', 'ca-certificates', 'curl']
+        state: present
+        update_cache: yes
+      
+    - name: Add Kubernetes apt repo key
+      command: curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+
+    - name: Add Kubernetes repo
+      apt_repository:
+        repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+
+    - name: Install Kubernetes components
+      apt:
+        name: ['kubeadm', 'kubelet', 'kubectl']
+        state: present
+        update_cache: yes
+
+    - name: Initialize master node
+      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      when: inventory_hostname == 'k8s-master'
+      register: kubeadm_init
+
+    - name: get token from init
+      set_fact:
+        join_token: "{{ kubeadm_init.stdout | regex_search('kubeadm join --token ([^ ]+)', '\\1') }}"
+      when: kubeadm_init is defined
+
+    - name: Get hash from init
+      set_fact:
+        join_hash: "{{ kubeadm_init.stdout | regex_search('sha256:([a-f0-9]+)', '\\1') }}"
+      when: kubeadm_init is defined
+
+    - name: Set up kubeconfig for regular user
+      command: |
+        mkdir -p /home/ubuntu/.kube
+        cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+        chown ubuntu:ubuntu /home/ubuntu/.kube/config
+      when: inventory_hostname == 'k8s-master'
+
+    - name: Join worker node to cluster
+      command: kubeadm join --token {{ join_token }} <master_ip>:6443 --discovery-token-ca-cert-hash sha256:{{ join_hash }}
+      when: inventory_hostname == 'k8s-app'
+
+   - name: install Helm
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: '0755'  # дать права на выполнение
+
+    - name: script Helm
+      command: /tmp/get_helm.sh
+
